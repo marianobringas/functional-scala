@@ -2,6 +2,8 @@
 
 package net.degoes.effects
 
+import java.io.IOException
+
 import net.degoes.effects.zio_background.Program.{ReadLine, Return, WriteLine}
 import scalaz.zio._
 import scalaz.zio.console._
@@ -253,7 +255,7 @@ object zio_composition {
   // integer into its string rendering using the `map` method of the `IO`
   // object.
   //
-  (IO.point(42) ? : IO[Nothing, String])
+  (IO.point(42).map(_.toString) : IO[Nothing, String])
 
   //
   // EXERCISE 2
@@ -262,7 +264,7 @@ object zio_composition {
   // integer error into its string rendering using the `leftMap` method of the
   // `IO` object.
   //
-  (IO.fail(42) ? : IO[String, Nothing])
+  (IO.fail(42).leftMap(_.toString) : IO[String, Nothing])
 
   //
   // EXERCISE 3
@@ -272,7 +274,12 @@ object zio_composition {
   //
   val ioX: IO[Nothing, Int] = IO.point(42)
   val ioY: IO[Nothing, Int] = IO.point(58)
-  val ioXPlusY: IO[Nothing, Int] = ioX.flatMap(???)
+  val ioXPlusY: IO[Nothing, Int] = ioX.flatMap(a => ioY.map( b => a + b))
+  val ioXPlusY2: IO[Nothing, Int] =
+    for {
+      x <- ioX
+      y <- ioY
+    } yield (x + y)
 
   //
   // EXERCISE 4
@@ -280,7 +287,15 @@ object zio_composition {
   // Using the `flatMap` method of `IO`, implement `ifThenElse`.
   //
   def ifThenElse[E, A](bool: IO[E, Boolean])(
-    ifTrue: IO[E, A], ifFalse: IO[E, A]): IO[E, A] = ???
+    ifTrue: IO[E, A], ifFalse: IO[E, A]): IO[E, A] = bool.flatMap( b => if(b) ifTrue else ifFalse)
+
+  def ifThenElse2[E, A](bool: IO[E, Boolean])(
+    ifTrue: IO[E, A], ifFalse: IO[E, A]): IO[E, A] =
+    for {
+      cond   <- bool
+      result <- if(cond) ifTrue else ifFalse
+    } yield result
+
   val exampleIf = ifThenElse(IO.point(true))(IO.point("It's true!"), IO.point("It's false!"))
 
   //
@@ -293,6 +308,8 @@ object zio_composition {
     v1 <- IO.point(42)
     v2 <- IO.point(58)
   } yield "The total is: " + (v1 + v2).toString
+
+  IO.point(42).flatMap( v1 => IO.point(58).map( v2 => "The total is: " + (v1 + v2).toString))
 
   //
   // EXERCISE 6
@@ -311,7 +328,21 @@ object zio_composition {
     }
   }
   def decode2[E](read: IO[E, Byte]): IO[E, Either[Byte, Int]] =
-    ???
+    for {
+      b <- read
+      e <- if (b < 0)
+             IO.now(Left(b))
+           else for
+                {
+                  b2 <- read
+                  b3 <- read
+                  b4 <- read
+
+                } yield Right(b.toInt +
+                                     (b2.toInt << 8) +
+                                     (b3.toInt << 8) +
+                                     (b4.toInt << 8))
+    } yield e
 
   //
   // EXERCISE 7
@@ -350,7 +381,10 @@ object zio_composition {
       action()
       repeatN1(n - 1, action)
     }
-  def repeatN2(n: Int, action: IO[Nothing, Unit]): IO[Nothing, Unit] = ???
+  def repeatN2(n: Int, action: IO[Nothing, Unit]): IO[Nothing, Unit] =
+    if( n <= 0)
+      IO.unit
+    else action *> repeatN2(n - 1, action)
 
   //
   // EXERCISE 10
@@ -358,6 +392,7 @@ object zio_composition {
   // Translate the following expression into its `flatMap` equivalent.
   //
   IO.point(42) *> IO.point(19)
+  IO.point(42).flatMap( _ => IO.point(19))
 
   //
   // EXERCISE 11
@@ -365,6 +400,7 @@ object zio_composition {
   // Translate the following expression into its `flatMap` equivalent.
   //
   IO.point(42) <* IO.point(19)
+  IO.point(42).flatMap(a => IO.point(19).map(_ => a))
 
   //
   // EXERCISE 12
@@ -373,6 +409,7 @@ object zio_composition {
   // the `map` and `flatMap` methods of the `IO` object.
   //
   (IO.point(42) <* IO.point(19)) *> IO.point(1)
+  IO.point(42).flatMap(a => IO.point(19).map(_ => a)).flatMap(_ => IO.point(1))
 }
 
 object zio_failure {
@@ -387,7 +424,7 @@ object zio_failure {
   // represents a failure with a string error message, containing a user-
   // readable description of the failure.
   //
-  val stringFailure1: IO[String, Int] = ???
+  val stringFailure1: IO[String, Int] = IO.fail("The program did not compile")
 
   //
   // EXERCISE 2
@@ -395,7 +432,7 @@ object zio_failure {
   // Using the `IO.fail` method, create an `IO[Int, String]` value that
   // represents a failure with an integer error code.
   //
-  val intFailure: IO[Int, String] = ???
+  val intFailure: IO[Int, String] = IO.fail(42)
 
   //
   // EXERCISE 3
@@ -403,7 +440,7 @@ object zio_failure {
   // Transform the error of `intFailure` into its string representation using
   // the `leftMap` method of `IO`.
   //
-  val stringFailure2: IO[String, String] = intFailure ?
+  val stringFailure2: IO[String, String] = intFailure.leftMap(_.toString)
 
   //
   // EXERCISE 4
@@ -413,8 +450,12 @@ object zio_failure {
   def accessArr1[A](i: Int, a: Array[A]): A =
     if (i < 0 || i >= a.length) throw new IndexOutOfBoundsException("The index " + i + " is out of bounds [0, " + a.length + ")")
     else a(i)
+
   def accessArr2[A](i: Int, a: Array[A]): IO[IndexOutOfBoundsException, A] =
-    ???
+    if (i < 0 || i >= a.length)
+      IO.fail(new IndexOutOfBoundsException("The index " + i + " is out of bounds [0, " + a.length + ")"))
+    else
+      IO.now(a(i))
 
   //
   // EXERCISE 5
@@ -426,7 +467,8 @@ object zio_failure {
   def divide1(n: Int, d: Int): IO[DenomIsZero, Int] =
     if (d == 0) IO.fail(DenomIsZero)
     else IO.now(n / d)
-  def divide2(n: Int, d: Int): Int = ???
+
+  def divide2(n: Int, d: Int): Int = n / d
 
   //
   // EXERCISE 6
@@ -434,8 +476,8 @@ object zio_failure {
   // Recover from a division by zero error by returning `-1`.
   //
   val recovered1: IO[Nothing, Int] = divide1(100, 0).attempt.map {
-    case Left(error) => ???
-    case Right(value) => ???
+    case Left(error) => -1
+    case Right(value) => value
   }
 
   //
@@ -443,7 +485,7 @@ object zio_failure {
   //
   // Recover from a division by zero error by using `redeem`.
   //
-  val recovered2: IO[Nothing, Int] = divide1(100, 0).redeem(???, ???)
+  val recovered2: IO[Nothing, Int] = divide1(100, 0).redeem(_ => IO.now(-1), IO.now(_))
 
   //
   // EXERCISE 8
@@ -453,7 +495,7 @@ object zio_failure {
   //
   val firstChoice: IO[DenomIsZero, Int] = divide1(100, 0)
   val secondChoice: IO[Nothing, Int] = IO.now(400)
-  val combined: IO[Nothing, Int] = ???
+  val combined: IO[Nothing, Int] = firstChoice orElse secondChoice
 }
 
 object zio_effects {
@@ -467,13 +509,22 @@ object zio_effects {
     def ?[B] = ???
   }
 
+  // IO.sync is for effectful computation that cannot fail
+  // IO.syncException for effectful computation that can throw an Exception
+  // IO.syncThrowable for effectful computation that can throw a Throwable
+  // IO.syncCatch for effectful computation that can throw Throwables, but can receive a partial function to deal with exceptions and transforming them
+  //   IO.syncCatch(Source.fromFile(file).getLines.toList) {
+  //      case e: IOException => e
+  //   }
+  //
+
   //
   // EXERCISE 1
   //
   // Using the `IO.sync` method, wrap Scala's `println` method to import it into
   // the world of pure functional programming.
   //
-  def putStrLn(line: String): IO[Nothing, Unit] = println ?
+  def putStrLn(line: String): IO[Nothing, Unit] = IO.sync(println(line))
 
   //
   // EXERCISE 2
@@ -481,7 +532,7 @@ object zio_effects {
   // Using the `IO.sync` method, wrap Scala's `readLine` method to import it
   // into the world of pure functional programming.
   //
-  val getStrLn: IO[Nothing, String] = readLine ?
+  val getStrLn: IO[Nothing, String] = IO.sync(readLine)
 
   //
   // EXERCISE 3
@@ -490,7 +541,11 @@ object zio_effects {
   // import it into the world of pure functional programming.
   //
   def readFile(file: File): IO[Exception, List[String]] =
-    Source.fromFile(file).getLines.toList ?
+    IO.syncException(Source.fromFile(file).getLines.toList)
+
+  // This one catches all Throwables instead of just Exceptions
+  def readFile2(file: File): IO[Throwable, List[String]] =
+    IO.syncThrowable(Source.fromFile(file).getLines.toList)
 
   //
   // EXERCISE 4
@@ -498,7 +553,7 @@ object zio_effects {
   // Identify the correct method and error type to import `System.nanoTime`
   // safely into the world of pure functional programming.
   //
-  def nanoTime: IO[???, Long] = System.nanoTime() ?
+  def nanoTime: IO[Nothing, Long] = IO.sync(System.nanoTime())
 
   //
   // EXERCISE 5
@@ -506,7 +561,11 @@ object zio_effects {
   // Identify the correct method, error, and value type to import `System.exit`
   // safely into the world of pure functional programming.
   //
-  def sysExit(code: Int): IO[???, ???] = System.exit(code) ?
+  def sysExit(code: Int): IO[SecurityException, Unit] = IO.syncCatch(System.exit(code)) {
+    case e: SecurityException => e
+  }
+
+  def sysExit2(code: Int): IO[Throwable, Unit] = IO.syncThrowable(System.exit(code))
 
   //
   // EXERCISE 6
@@ -514,8 +573,10 @@ object zio_effects {
   // Identify the correct method, error, and value type to import
   // `Array.update` safely into the world of pure functional programming.
   //
-  def arrayUpdate[A](a: Array[A], i: Int, f: A => A): IO[???, ???] =
-    a.update(i, f(a(i))) ?
+  def arrayUpdate[A](a: Array[A], i: Int, f: A => A): IO[ArrayIndexOutOfBoundsException, Unit] =
+    IO.syncCatch(a.update(i, f(a(i)))) {
+      case e: ArrayIndexOutOfBoundsException => e
+    }
 
   //
   // EXERCISE 7
@@ -524,10 +585,10 @@ object zio_effects {
   // choose the correct error type.
   //
   val scheduledExecutor = Executors.newScheduledThreadPool(1)
-  def sleep(l: Long, u: TimeUnit): IO[???, Unit] =
-    scheduledExecutor.schedule(new Runnable {
-      def run(): Unit = ???
-    }, l, u) ?
+  def sleep(l: Long, u: TimeUnit): IO[Nothing, Unit] =
+    IO.async[Nothing, Unit](k => scheduledExecutor.schedule(new Runnable {
+      def run(): Unit = k(ExitResult.Completed(()))
+    }, l, u))
 
   //
   // EXERCISE 8
@@ -547,7 +608,79 @@ object zio_effects {
         println("You guessed wrong! The number was " + number)
     }
   }
-  def playGame2: IO[Exception, Unit] = ???
+
+  def playGame2: IO[Exception, Unit] =
+    for {
+      n     <- IO.sync(scala.util.Random.nextInt(5))
+      _     <- putStrLn("Enter a number between 0 - 5: ")
+      input <- getStrLn
+      _     <- IO.syncCatch(input.toInt) { case e => Unit }
+                                                           .redeem(
+          _ => putStrLn("You didn't enter an integer!") *> playGame2,
+          guess =>
+            if (guess == n) putStrLn("You guessed right! The number was " + n)
+            else putStrLn("You guessed wrong! The number was " + n)
+        )
+    } yield ()
+
+  /*
+  def pureNextInt(i: Int): IO[Nothing, Int]      = IO.sync(scala.util.Random.nextInt(i))
+  def purePrint(s: => String): IO[Nothing, Unit] = IO.sync(println(s))
+  val pureReadInt: IO[Nothing, Option[Int]]      = IO.sync(Try(scala.io.StdIn.readLine().toInt).toOption)
+
+  def playGame2: IO[Exception, Unit] =
+    pureNextInt(5).flatMap { number =>
+      purePrint("Enter a number between 0 - 5: ") *>
+        pureReadInt.flatMap {
+          case None                         => purePrint("You didn't enter an integer!") *> playGame2
+          case Some(gess) if gess == number => purePrint("You guessed right! The number was " + number)
+          case _                            => purePrint("You guessed wrong! The number was " + number)
+        }
+    }
+
+  def playGame3: IO[Exception, Unit] =
+    for {
+      number <- pureNextInt(5)
+      _      <- purePrint("Enter a number between 0 - 5: ")
+      line   <- getStrLn
+      _ <- IO
+        .syncException(line.toInt)
+        .redeem(
+          _ => purePrint("You didn't enter an integer!") *> playGame2,
+          guess =>
+            if (guess == number) purePrint("You guessed right! The number was " + number)
+            else purePrint("You guessed wrong! The number was " + number)
+        )
+    } yield ()
+
+    def nextInt(upper: Int): IO[Nothing, Int] =
+    IO.sync(scala.util.Random.nextInt(5))
+
+  def checkGuess(actual: Int, guess: Int): IO[Nothing, Unit] =
+    if(guess == actual)
+      putStrLn(" You guessed right! The number was ")
+    else
+      putStrLn("You guess wrong")
+
+  def handleNotAnInt: IO[Nothing, Unit] =
+    putStrLn("You didn't enter an integer") *> playGame2
+
+  def getInput: IO[Nothing, String] =
+    putStrLn("Enter a number between 0 - 5: ") *> getStrLn
+
+  def checkInput(number: Int, input: String): IO[Nothing, Unit] =
+    IO
+      .syncException(input.toInt)
+      .redeem(_ => handleNotAnInt, checkGuess(number, _))
+
+  def playGame2: IO[Nothing, Unit] = for {
+    number <- nextInt(5)
+    input  <- getInput
+    _      <- checkInput(number, input)
+  } yield ()
+
+   */
+
 }
 
 object zio_concurrency {
@@ -565,7 +698,8 @@ object zio_concurrency {
   //
   val leftContestent1 = IO.never
   val rightContestent1 = putStrLn("Hello World")
-  val raced1 = ???
+  val raced1 = leftContestent1 race rightContestent1
+  val raced2 = (leftContestent1.attempt) race (rightContestent1.attempt)
 
   //
   // EXERCISE 2
@@ -573,9 +707,9 @@ object zio_concurrency {
   // Race `leftContestent2` and `rightContestent2` using the `race` method of
   // `IO` to see which one finishes first with a successful value.
   //
-  val leftContestent2: IO[Exception, Nothing] = IO.fail(new Exception("Uh oh!"))
+  val leftContestent2: IO[IOException, Nothing] = IO.fail(new IOException("Uh oh!"))
   val rightContestent2: IO[Exception, Unit] = IO.sleep(10.milliseconds) *> putStrLn("Hello World")
-  val raced2: ??? = ???
+  val raced3: IO[Nothing, Either[Either[IOException, Nothing], Either[Exception,Unit]]] = (leftContestent2.attempt) raceBoth (rightContestent2.attempt)
 
   //
   // EXERCISE 3
@@ -585,7 +719,7 @@ object zio_concurrency {
   //
   val leftWork1: IO[Nothing, Int] = fibonacci(10)
   val rightWork1: IO[Nothing, Int] = fibonacci(10)
-  val par1: ??? = ???
+  val par1: IO[Nothing, (Int, Int)] = leftWork1 par rightWork1
 
   //
   // EXERCISE 4
@@ -593,7 +727,7 @@ object zio_concurrency {
   // Compute all values `workers` in parallel using `IO.parAll`.
   //
   val workers: List[IO[Nothing, Int]] = (1 to 10).toList.map(fibonacci(_))
-  val workersInParallel: IO[Nothing, List[Int]] = ???
+  val workersInParallel: IO[Nothing, List[Int]] = IO.parAll(workers)
 
   //
   // EXERCISE 5
@@ -602,7 +736,12 @@ object zio_concurrency {
   // and yielding a tuple of their results.
   //
   def myPar[E, A, B](left: IO[E, A], right: IO[E, B]): IO[E, (A, B)] =
-    ???
+    for {
+      fiberA <- left.fork
+      fiberB <- right.fork
+      a      <- fiberA.join
+      b      <- fiberB.join
+    } yield (a, b)
 
   //
   // EXERCISE 6
@@ -611,9 +750,18 @@ object zio_concurrency {
   // all fibers forked within it will be terminated cleanly.
   //
   val supervisedExample: IO[Nothing, Unit] =
-    (for {
+  IO.supervise {
+    for {
       fiber <- fibonacci(10000).fork
-    } yield ()) ?
+    } yield ()
+  }
+
+  val supervisedExample2: IO[Nothing, Unit] =
+    (for {
+        fiber <- fibonacci(10000).fork
+      } yield ()).supervised
+
+  val fiberWithErrorHandler = fibonacci(19999).fork0(error => putStr(error.toString).attempt.void)
 
   //
   // EXERCISE 7
@@ -624,6 +772,7 @@ object zio_concurrency {
   val interrupted1: IO[Nothing, Unit] =
     for {
       fiber <- fibonacci(10000).fork
+      _     <- fiber.interrupt
     } yield ()
 
   //
@@ -637,9 +786,19 @@ object zio_concurrency {
     for {
       fiber1 <- fibonacci(10).fork
       fiber2 <- fibonacci(20).fork
-      both   <- (??? : IO[Nothing, Fiber[Nothing, Int]])
+      both   <- IO.point(fiber1.zipWith(fiber2)(_ + _))
       _      <- both.interrupt
     } yield ()
+
+  // Same thing as above without the IO.point
+  val interrupted3: IO[Nothing, Unit] =
+    for {
+      fiber1 <- fibonacci(10).fork
+      fiber2 <- fibonacci(20).fork
+      both    = fiber1.zipWith(fiber2)(_ + _)
+      _      <- both.interrupt
+    } yield ()
+
 
   def fibonacci(n: Int): IO[Nothing, Int] =
     if (n <= 1) IO.now(n)
@@ -665,11 +824,18 @@ object zio_resources {
   // Rewrite the following procedural program to ZIO, using `IO.fail` and the
   // `bracket` method of the `IO` object.
   //
+  // IO.bracket:
+  //   - acquire, which produces an A (may fail, uninterruptible)
+  //   - release, which releases the A (may not fail, uninterruptible)
+  //   - use, which uses the A (may fail, interruptible)
+  //
+  // acquire.bracket(release(_)) { resource => for { ... } }
   def tryCatch1(): Unit =
     try throw new Exception("Uh oh")
     finally println("On the way out...")
   val tryCatch2: IO[Exception, Unit] =
-    ???
+    IO.fail(new Exception("Uh oh")).
+      bracket(_ => putStrLn("On the way out...").attempt.void)(IO.now)
 
   //
   // EXERCISE 2
@@ -689,17 +855,36 @@ object zio_resources {
       bytes  <- readAll(stream, Nil)
     } yield bytes
   }
-  def readFile2(file: File): IO[Exception, List[Byte]] = ???
+
+  def readFile2(file: File): IO[Exception, List[Byte]] = {
+    def readAll(is: InputStream, acc: List[Byte]): IO[Exception, List[Byte]] =
+      is.read.flatMap {
+        case None => IO.now(acc.reverse)
+        case Some(byte) => readAll(is, byte :: acc)
+      }
+
+    InputStream.openFile(file).bracket( _.close.attempt.void)(readAll(_, Nil))
+  }
 
   //
   // EXERCISE 3
   //
   // Implement the `tryCatchFinally` method using `bracket`.
   //
-  def tryCatchFinally[E, A]
-    (try0: IO[E, A])
-    (catch0: PartialFunction[E, IO[E, A]])
-    (finally0: IO[Nothing, Unit]): IO[E, A] = ???
+//  def tryCatchFinally[E, A]
+//    (try0: IO[E, A])
+//    (catch0: PartialFunction[E, IO[E, A]])
+//    (finally0: IO[Nothing, Unit]): IO[E, A] =
+//      try0.attempt.bracket(a => finally0) {
+//        case Left(e) => catch0.applyOrElse(e, IO.fail)
+//        case Right(a) => IO.now(a)
+//      }
+
+  def tryCatchFinally2[E, A]
+  (try0: IO[E, A])
+  (catch0: PartialFunction[E, IO[E, A]])
+  (finally0: IO[Nothing, Unit]): IO[E, A] =
+    try0.catchSome(catch0).ensuring(finally0)
 
   //
   // EXERCISE 4
@@ -718,11 +903,39 @@ object zio_resources {
       case e : java.io.IOException => Nil
     } finally if (fis != null) fis.close()
   }
+
   def readFileTCF2(file: File): IO[Exception, List[Byte]] =
-    ???
+    IO.syncException(new FileInputStream(file))
+      .bracket(fis ⇒ IO.syncException(fis.close()).attempt.void) {
+        fis =>
+               for {
+                     l     <- IO.syncException(file.length.toInt)
+                     array <- IO.syncException(Array.ofDim[Byte](l))
+               } yield array.toList
+      }
 }
 
 object zio_schedule {
+
+  //
+  // Every Schedule[A,B] can:
+  //
+  //  - start with some initial state
+  //  - for every step of the schedule:
+  //    - update its state
+  //    - consume input values of type A
+  //    - produce output values of type B
+  //    - decides to continue of complete the schedule
+  //    - decice to delay the next step of the schedule by some duration
+  //
+  // Use cases:
+  //   - Consume errors:
+  //     - Retries (io: IO[E,A]).retry(s: Schedule[E, B])
+  //     - Retries with default (io: IO[E,A]).retryOrElse(s: Schedule[E, B], (b: B))
+  //   - Consume outputs/values:
+  //     - Repeat an action (io: IO[E,A]).repeat(s: Schedule[E, B])
+  //     - Repeat an action with error handling(io: IO[E,A]).repeatOrElse(s: Schedule[E, B], (e: E))
+
   implicit class FixMe[A](a: A) {
     def ? = ???
   }
@@ -732,7 +945,7 @@ object zio_schedule {
   //
   // Using `Schedule.recurs`, create a schedule that recurs 5 times.
   //
-  val fiveTimes: Schedule[Any, Int] = ???
+  val fiveTimes: Schedule[Any, Int] = Schedule.recurs(5)
 
   //
   // EXERCISE 2
@@ -740,7 +953,7 @@ object zio_schedule {
   // Using the `repeat` method of the `IO` object, repeat printing "Hello World"
   // five times to the console.
   //
-  val repeated1 = putStrLn("Hello World") ?
+  val repeated1 = putStrLn("Hello World").repeat(fiveTimes)
 
   //
   // EXERCISE 3
@@ -748,7 +961,7 @@ object zio_schedule {
   // Using `Schedule.spaced`, create a schedule that recurs forever every 1
   // second.
   //
-  val everySecond: Schedule[Any, Int] = ???
+  val everySecond: Schedule[Any, Int] = Schedule.spaced(1.second)
 
   //
   // EXERCISE 4
@@ -757,7 +970,7 @@ object zio_schedule {
   // and the `everySecond` schedule, create a schedule that repeats fives times,
   // every second.
   //
-  val fiveTimesEverySecond = ???
+  val fiveTimesEverySecond = fiveTimes && everySecond
 
   //
   // EXERCISE 5
@@ -765,7 +978,7 @@ object zio_schedule {
   // Using the `repeat` method of the `IO` object, repeat the action
   // putStrLn("Hi hi") using `fiveTimesEverySecond`.
   //
-  val repeated2 = ???
+  val repeated2 = putStrLn("Hi hi").repeat(fiveTimesEverySecond)
 
   //
   // EXERCISE 6
@@ -774,7 +987,7 @@ object zio_schedule {
   // schedule, and the `everySecond` schedule, create a schedule that repeats
   // fives times rapidly, and then repeats every second forever.
   //
-  val fiveTimesThenEverySecond = ???
+  val fiveTimesThenEverySecond = fiveTimes andThen everySecond
 
   //
   // EXERCISE 7
@@ -783,7 +996,23 @@ object zio_schedule {
   // a total of five times.
   //
   val error1 = IO.fail("Uh oh!")
-  val retried5 = error1 ?
+  val retried5 = error1 retry fiveTimes
+
+  //
+  // EXERCISE 8
+  //
+  // Produce a jittered schedule that first does exponential (starting from 10 ms) spacing but then
+  // after the spacing reaches 60 seconds, switches over to fixed scpacing of
+  // 1 min between recurrences, but will only do that for up to 100 times
+  // and produce a list of the results
+  //
+
+  def exponentialScheduleUpTo1Min[A]: Schedule[A, Duration] = Schedule.exponential(10.milliseconds).whileValue(_ < 60.seconds)
+  def scheduleSpaced60SecsApartUpTo100Times[A]: Schedule[A, (Int, Int)] = Schedule.spaced(60.seconds) && Schedule.recurs(100)
+  def customScheduleWithValuesAndErrors[A]: Schedule[A, Either[Duration, (Int, Int)]] = exponentialScheduleUpTo1Min andThen scheduleSpaced60SecsApartUpTo100Times
+  def extractedValues[A]: Schedule[A, A] = customScheduleWithValuesAndErrors *> Schedule.identity[A]
+  def mySchedule[A]: Schedule[A, List[A]] = extractedValues.collect.jittered
+
 }
 
 object zio_interop {

@@ -117,8 +117,10 @@ object functor {
   //
   case class FunctorNest[F[_], G[_], A](run: F[G[A]])
   implicit def FunctorNestFunctor[F[_]: Functor, G[_]: Functor]:
-    Functor[FunctorNest[F, G, ?]] = ???
-
+  Functor[FunctorNest[F, G, ?]] = new Functor[FunctorNest[F, G, ?]] {
+    override def map[A, B](fa: FunctorNest[F, G, A])(f: A => B): FunctorNest[F, G, B] =
+      new FunctorNest[F, G, B](fa.run.map(_.map(f)))
+  }
   trait Apply[F[_]] extends Functor[F] {
     def zip[A, B](l: F[A], r: F[B]): F[(A, B)]
   }
