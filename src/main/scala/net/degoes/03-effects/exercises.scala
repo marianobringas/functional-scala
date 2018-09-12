@@ -2,46 +2,65 @@
 
 package net.degoes.effects
 
+import net.degoes.effects.zio_background.Program.{ReadLine, Return, WriteLine}
 import scalaz.zio._
 import scalaz.zio.console._
+
 import scala.concurrent.duration._
 
 object zio_background {
-  sealed trait Program[A] { self =>
-    final def *> [B](that: Program[B]): Program[B] =
-      self.flatMap(_ => that)
-    final def <* [B](that: Program[B]): Program[A] =
-      self.flatMap(a => that.map(_ => a))
 
+  sealed trait Program[A] { self =>
     final def map[B](f: A => B): Program[B] =
       self match {
-        case Program.ReadLine(next) =>
-          Program.ReadLine(input => next(input).map(f))
-        case Program.WriteLine(line, next) =>
-          Program.WriteLine(line, next.map(f))
-        case Program.Return(value) =>
-          Program.Return(() => f(value()))
+        case Program.ReadLine(next) => Program.ReadLine(input => next(input).map(f))
+        case Program.WriteLine(line, next) => Program.WriteLine(line, next.map(f))
+        case Program.Return(value) => Program.Return(() => f(value()))
       }
 
     final def flatMap[B](f: A => Program[B]): Program[B] =
       self match {
-        case Program.ReadLine(next) =>
-          Program.ReadLine(input => next(input).flatMap(f))
-        case Program.WriteLine(line, next) =>
-          Program.WriteLine(line, next.flatMap(f))
-        case Program.Return(value) =>
-          f(value())
+        case Program.ReadLine(next) => Program.ReadLine(input => next(input).flatMap(f))
+        case Program.WriteLine(line, next) => Program.WriteLine(line, next.flatMap(f))
+        case Program.Return(value) => f(value())
       }
+
+    final def *> [B](that: Program[B]): Program[B] =
+      self.flatMap( _ => that)
+
+    final def <* [B](that: Program[B]): Program[A] =
+      self.flatMap(a => that.map(_ => a))
   }
+
   object Program {
     final case class ReadLine[A](next: String => Program[A]) extends Program[A]
     final case class WriteLine[A](line: String, next: Program[A]) extends Program[A]
     final case class Return[A](value: () => A) extends Program[A]
 
-    val readLine: Program[String] = ReadLine(point[String](_))
-    def writeLine(line: String): Program[Unit] = WriteLine(line, point(()))
-    def point[A](a: => A): Program[A] = Return(() => a)
+    def readLine: Program[String] = ReadLine(point)
+    def writeLine(line: String): Program[Unit] = WriteLine(line, Return(() => ()))
+    def point[A](a: A): Program[A] = Return(() => a)
   }
+
+//  sealed trait Program[A] { self =>
+//    import Program.{Chain, Return}
+//
+//    final def map[B](f: A => B): Program[B] =
+//      Chain(self, f.andThen(Return(_)))
+//
+//    final def flatMap[B](f: A => Program[B]): Program[B] =
+//      Chain(self, f)
+//  }
+//  object Program {
+//    final case class ReadLine[A](next: String => Program[A]) extends Program[A]
+//    final case class WriteLine[A](line: String, next: Program[A]) extends Program[A]
+//    final case class Chain[A0, A](previous: Program[A0], next: A0 => Program[A]) extends Program[A]
+//    final case class Return[A](value: A) extends Program[A]
+//
+//    def readLine: Program[String] = ReadLine(Return(_))
+//    def writeLine(line: String): Program[Unit] = WriteLine(line, Return(()))
+//    def point[A](a: A): Program[A] = Return(a)
+//  }
 
   import Program.{readLine, writeLine, point}
 
@@ -59,7 +78,11 @@ object zio_background {
   //
   // Rewrite `program1` to use a for comprehension.
   //
-  val yourName2: Program[Unit] = ???
+  val yourName2: Program[Unit] = for {
+    _    <- writeLine("What is your name?")
+    name <- readLine
+    _    <- writeLine("Hello, " + name + ", good to meet you!")
+  } yield ()
 
   //
   // EXERCISE 2
@@ -67,9 +90,12 @@ object zio_background {
   // Rewrite `yourName2` using the helper function `getName`, which shows how
   // to create larger programs from smaller programs.
   //
-  def yourName3: Program[Unit] = ???
+  def yourName3: Program[Unit] = for {
+    name <- getName
+    _    <- writeLine("Hello, " + name + ", good to meet you!")
+  } yield ()
 
-  val getName: Program[String] =
+  def getName: Program[String] =
     writeLine("What is your name?").flatMap(_ => readLine)
 
   //
@@ -78,7 +104,15 @@ object zio_background {
   // Implement the following effectful procedure, which interprets
   // `Program[A]` into `A`. You can use this procedure to "run" programs.
   //
-  def interpret[A](program: Program[A]): A = ???
+  def interpret[A](program: Program[A]): A = program match {
+    case WriteLine(line, next) =>
+      println(line)
+      interpret(next)
+    case ReadLine(next) =>
+      interpret(next(scala.io.StdIn.readLine()))
+    case Return(value) =>
+      value()
+  }
 
   //
   // EXERCISE 4
@@ -86,8 +120,14 @@ object zio_background {
   // Implement the following function, which shows how to write a combinator
   // that operates on programs.
   //
-  def sequence[A](programs: List[Program[A]]): Program[List[A]] =
-    ???
+  def sequence[A](programs: List[Program[A]]): Program[List[A]] = programs match {
+    case Nil => Program.point(Nil)
+    case head :: tail =>
+      for {
+        a  <- head
+        as <- sequence(tail)
+      } yield a :: as
+  }
 
   //
   // EXERCISE 5
@@ -113,7 +153,23 @@ object zio_background {
     }
 
   }
-  def ageExplainer2: Program[Unit] = ???
+
+  def ageExplainer2: Program[Int] = for {
+    _     <- writeLine("What is your age?")
+    input <- readLine
+    age   <- scala.util.Try(input.toInt).toOption match {
+      case Some(age) =>
+        (if (age < 12) writeLine("You are a kid")
+         else if (age < 20) writeLine("You are a teenager")
+         else if (age < 30) writeLine("You are a grownup")
+         else if (age < 50) writeLine("You are an adult")
+         else if (age < 80) writeLine("You are a mature adult")
+         else if (age < 100) writeLine("You are elderly")
+         else writeLine("You are probably lying.")) *> point(age)
+      case None =>
+        writeLine("That's not an age, try again") *> ageExplainer2
+    }
+  } yield age
 }
 
 object zio_type {
@@ -125,7 +181,7 @@ object zio_type {
   // Write the type of `IO` values that can fail with an `Exception`, or
   // may produce an `A`.
   //
-  type Exceptional[A] = IO[???, ???]
+  type Exceptional[A] = IO[Exception, A]
 
   //
   // EXERCISE 2
@@ -133,14 +189,14 @@ object zio_type {
   // Write the type of `IO` values that can fail with a `Throwable`, or
   // may produce an `A`.
   //
-  type Task[A] = IO[???, ???]
+  type Task[A] = IO[Throwable, A]
 
   //
   // EXERCISE 3
   //
   // Write the type of `IO` values that cannot fail, but may produce an `A.`
   //
-  type Infallible[A] = IO[???, ???]
+  type Infallible[A] = IO[Nothing, A]
 
   //
   // EXERCISE 4
@@ -148,14 +204,16 @@ object zio_type {
   // Write the type of `IO` values that cannot produce a value, but may fail
   // with an `E`.
   //
-  type Unproductive[E] = IO[???, ???]
+  // Looping forever without producing a value having effects that might fail. i.e. Webserver
+  //
+  type Unproductive[E] = IO[E, Nothing]
 
   //
   // EXERCISE 5
   //
   // Write the type of `IO` values that cannot fail or produce a value.
   //
-  type Unending = IO[???, ???]
+  type Unending = IO[Nothing, Nothing]
 }
 
 object zio_values {
@@ -165,7 +223,7 @@ object zio_values {
   // Using the `IO.now` method, lift the integer `2` into a strictly-evaluated
   // `IO`.
   //
-  val ioInteger: IO[Nothing, Int] = ???
+  val ioInteger: IO[Nothing, Int] = IO.now(2)
 
   //
   // EXERCISE 2
@@ -173,7 +231,7 @@ object zio_values {
   // Using the `IO.point` method, lift the string "Functional Scala" into a
   // lazily-evaluated `IO`.
   //
-  val ioString: IO[Nothing, String] = ???
+  val ioString: IO[Nothing, String] = IO.point("Functional Scala")
 
   //
   // EXERCISE 3
@@ -181,7 +239,7 @@ object zio_values {
   // Using the `IO.fail` method to lift the string "Bad Input" into a failed
   // `IO`.
   //
-  val failedInput: IO[String, Nothing] = ???
+  val failedInput: IO[String, Nothing] = IO.fail("Bad Input")
 }
 
 object zio_composition {
