@@ -6,6 +6,14 @@ lazy val functionalScala = (project in file(".")).
     organization  := "net.degoes",
     version       := "0.1-SNAPSHOT",
     scalaVersion  := "2.12.6",
+    scalacOptions in Compile in console := Seq(
+      "-Ypartial-unification",
+      "-language:higherKinds",
+      "-language:existentials",
+      "-Yno-adapted-args",
+      "-Xsource:2.13",
+      "-Yrepl-class-based"
+    ),
     initialCommands in Compile in console := """
                                                |import scalaz._
                                                |import scalaz.zio._
@@ -29,7 +37,6 @@ scalacOptions ++= Seq(
   , "-Xverify"
   , "-feature"
   ,"-Ypartial-unification"
-  ,"-Xfatal-warnings"
   , "-language:_"
 )
 
